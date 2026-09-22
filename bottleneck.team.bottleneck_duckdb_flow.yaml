@@ -1,0 +1,145 @@
+id: bottleneck_duckdb_flow
+namespace: bottleneck.team
+
+tasks:
+  - id: download_erp
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_erp.xlsx"
+
+  - id: download_liaison
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/fichier_liaison.xlsx"
+
+  - id: download_web
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_web.xlsx"
+
+  - id: creation_tables_duckdb
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb kestra
+    dependencyCacheEnabled: true
+    inputFiles: 
+      function_creation_tables.py: "{{ read('function_creation_tables.py') }}"
+      Fichier_erp.xlsx: "{{ outputs.download_erp.uri }}"
+      Fichier_liaison.xlsx: "{{ outputs.download_liaison.uri }}"
+      Fichier_web.xlsx: "{{ outputs.download_web.uri }}"
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      from kestra import Kestra
+      from function_creation_tables import creation_table
+
+      database = 'bottleneck'
+      fichiers = ['Fichier_erp.xlsx', 'Fichier_liaison.xlsx', 'Fichier_web.xlsx']
+
+      tables_export = creation_table(fichiers,database)
+
+      # On expose la valeur en tant qu'output Kestra
+      Kestra.outputs({"tables_creees": tables_export})
+      
+  - id: verif_table_creation
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.creation_tables_duckdb.outputFiles['bottleneck.db'] }}"
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';  
+      SELECT * FROM 'erp_export_data' LIMIT 5;
+      SELECT * FROM 'web_export_data' LIMIT 5;
+      SELECT * FROM 'liaison_export_data' LIMIT 5;
+  
+  - id: cleaning_tables
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb kestra
+    dependencyCacheEnabled: true
+    inputFiles:
+      functions_cleaning_tables.py: "{{read('functions_cleaning_tables.py')}}"
+      bottleneck.db: "{{ outputs.creation_tables_duckdb.outputFiles['bottleneck.db']}}"     
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      from functions_cleaning_tables import delete_columns_null, delete_null_row, dedoublement, convert_format
+      from kestra import Kestra
+      
+      tables_export = {{ outputs.creation_tables_duckdb.vars.tables_creees }}
+      database = 'bottleneck'
+
+      _,tables_clean1 = delete_columns_null(tables_export,database)
+      tables_clean2 = delete_null_row(tables_export,tables_clean1, database)
+      tables_clean3 = dedoublement(tables_export,tables_clean2, database)
+      tables_clean4 = convert_format(tables_export,tables_clean3, database)
+
+      Kestra.outputs({"tables_nettoyees": tables_clean4})
+
+  - id: verif_tables_clean
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db'] }}"
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';  
+      
+      SELECT * FROM 'erp_export_data_clean' LIMIT 5;
+      SELECT * FROM 'web_export_data_clean' LIMIT 5;
+      SELECT * FROM 'liaison_export_data_clean' LIMIT 5;
+
+      DESCRIBE FROM 'erp_export_data_clean';
+      DESCRIBE FROM 'web_export_data_clean';
+      DESCRIBE FROM 'liaison_export_data_clean';
+
+      SUMMARIZE FROM 'erp_export_data_clean';
+      SUMMARIZE FROM 'web_export_data_clean';
+      SUMMARIZE FROM 'liaison_export_data_clean';
+
+  - id: cleaning_tables_special
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb kestra
+    dependencyCacheEnabled: true
+    inputFiles:
+      functions_specific_cleaning_tables.py: "{{read('functions_specific_cleaning_tables.py')}}"
+      bottleneck.db: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db']}}"     
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      from functions_specific_cleaning_tables import delete_negative_price, suppression_lignes
+      from kestra import Kestra
+
+      tables_export = {{ outputs.creation_tables_duckdb.vars.tables_creees }}
+      tables_clean = {{ outputs.cleaning_tables.vars.tables_nettoyees }}
+      database = 'bottleneck'
+
+      tables_clean1,tables_negative_prices = delete_negative_price(tables_export, tables_clean,database)
+      
+      # Suppression lignes avec bon-cadeau, concerne la table web_export_data_clean  
+
+    
+      tables_clean2 = suppression_lignes(tables_clean1, database, column='sku', valeur='bon-cadeau-25-euros')
+
+      # Suppression lignes attachment images, concerne la table web_export_data_clean
+      tables_clean3 = suppression_lignes(tables_clean2,database,column='post_type',valeur='attachment')
+
+      Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
+
+  - id: verif_tables_clean_specific
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db'] }}"
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';  
+      
+      SUMMARIZE FROM 'erp_export_data_clean';
+      SUMMARIZE FROM 'web_export_data_clean';
+      SUMMARIZE FROM 'liaison_export_data_clean';
+
+
+
+
+
+
