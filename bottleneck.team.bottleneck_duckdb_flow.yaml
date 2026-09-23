@@ -117,7 +117,6 @@ tasks:
       tables_clean1,tables_negative_prices = delete_negative_price(tables_export, tables_clean,database)
       
       # Suppression lignes avec bon-cadeau, concerne la table web_export_data_clean  
-
     
       tables_clean2 = suppression_lignes(tables_clean1, database, column='sku', valeur='bon-cadeau-25-euros')
 
@@ -137,6 +136,107 @@ tasks:
       SUMMARIZE FROM 'erp_export_data_clean';
       SUMMARIZE FROM 'web_export_data_clean';
       SUMMARIZE FROM 'liaison_export_data_clean';
+
+  - id: fusion_erp_web_tables
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb kestra
+    dependencyCacheEnabled: true
+    inputFiles:
+     fusion_tables_liaison.py: "{{read('fusion_tables_liaison.py')}}"
+     bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      from fusion_tables_liaison import join_tables_with_liaison
+      from kestra import Kestra
+      database = 'bottleneck'
+      table_fusion = join_tables_with_liaison('web_export_data_clean','sku',
+                                              'erp_export_data_clean', 'product_id',
+                                              'liaison_export_data_clean', 'id_web','product_id',
+                                              database, 'web_erp_joined')
+      
+      Kestra.outputs({"table fusionnée": table_fusion})
+
+  - id: verif_table_fusion
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.fusion_erp_web_tables.outputFiles['bottleneck.db'] }}"
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';  
+      
+      SUMMARIZE FROM 'web_erp_joined';
+      DESCRIBE FROM 'web_erp_joined';
+      SELECT * FROM 'web_erp_joined' LIMIT 5;
+      SELECT COUNT(*) FROM 'web_erp_joined';
+      SELECT COUNT(*) FROM 'web_export_data_clean';
+
+  - id: calcul_CA
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb
+    dependencyCacheEnabled: true
+    inputFiles:
+     bottleneck.db: "{{ outputs.fusion_erp_web_tables.outputFiles['bottleneck.db']}}"
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      import duckdb
+
+      conn=duckdb.connect()
+      conn.sql("ATTACH IF NOT EXISTS 'bottleneck.db';")
+      
+      #Chiffre d'affaire par produit
+      conn.sql("""
+      CREATE OR REPLACE TABLE bottleneck.revenus_web AS
+      SELECT 
+          product_id,
+          price,
+          total_sales,
+          price*total_sales AS CA_product
+      FROM bottleneck.web_erp_joined;
+      """
+      )
+      print(conn.sql("FROM bottleneck.revenus_web LIMIT 5;"))
+
+      #Chiffre d'affaire global
+      print(conn.sql("SELECT SUM(price*total_sales) AS CA_global FROM bottleneck.revenus_web;"))
+
+      conn.close()
+  - id: generate_excel
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.calcul_CA.outputFiles['bottleneck.db'] }}"
+    outputFiles:
+      - ca_products
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';
+      INSTALL excel;
+      LOAD excel;
+      COPY (
+        SELECT *
+        FROM 'revenus_web'
+      )
+      TO '{{ outputFiles.ca_products }}'
+      WITH (
+          FORMAT xlsx,
+          HEADER true,
+          SHEET 'CA_products'
+      );
+
+
+
+
+
+
+
+
+    
+
 
 
 
