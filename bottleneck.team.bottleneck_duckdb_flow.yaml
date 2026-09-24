@@ -227,6 +227,73 @@ tasks:
           HEADER true,
           SHEET 'CA_products'
       );
+  - id: z_score_calculation
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.13-slim
+    beforeCommands:
+      - pip install --no-cache-dir duckdb kestra pandas
+    dependencyCacheEnabled: true
+    inputFiles:
+     bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
+     script_z_score.py: "{{ read('script_z_score.py') }}"
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      import duckdb
+      from kestra import Kestra
+      from script_z_score import z_score
+
+      database = 'bottleneck'
+
+      table_z = z_score('web_erp_joined', database, 'price', 'premium')
+
+      Kestra.outputs({"table z-score": table_z})
+  
+  - id: verif_table_z
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db'] }}"
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';  
+   
+      SELECT * FROM 'web_erp_joined_z' LIMIT 5;
+  
+
+  - id: vins_premium_ordinaires
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"
+    databaseUri: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db'] }}"
+    outputFiles:
+      - vins_premium.csv
+      - vins_ordinaires.csv
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';
+
+      SELECT COUNT(*)
+      FROM 'web_erp_joined_z'
+      WHERE premium = 1;
+
+      COPY (
+      SELECT * 
+      FROM 'web_erp_joined_z'
+      WHERE premium = 1
+      )
+      TO '{{ outputFiles['vins_premium.csv'] }}' (HEADER, DELIMITER ',');
+
+      SELECT COUNT(*) 
+      FROM 'web_erp_joined_z' 
+      WHERE premium = 0;
+
+      COPY (
+      SELECT * 
+      FROM 'web_erp_joined_z' 
+      WHERE premium = 0
+      )
+      TO '{{ outputFiles['vins_ordinaires.csv'] }}' (HEADER, DELIMITER ',');
+
+
 
 
 

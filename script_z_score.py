@@ -1,5 +1,5 @@
 import duckdb
-
+import pandas as pd
 
 #Script Python calcul Z-score
 def z_score(table, database:str, column:str, new_column:str):
