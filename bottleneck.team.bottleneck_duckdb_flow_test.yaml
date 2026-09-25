@@ -1,0 +1,347 @@
+id: bottleneck_duckdb_flow_test
+namespace: bottleneck.team
+
+tasks:
+  - id: download_erp
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_erp.xlsx"
+
+  - id: download_liaison
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/fichier_liaison.xlsx"
+
+  - id: download_web
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_web.xlsx"
+
+  - id: creation_tables_duckdb
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: kestra-custom-image:latest
+    dependencyCacheEnabled: true
+    inputFiles: 
+      function_creation_tables.py: "{{ read('function_creation_tables.py') }}"
+      Fichier_erp.xlsx: "{{ outputs.download_erp.uri }}"
+      Fichier_liaison.xlsx: "{{ outputs.download_liaison.uri }}"
+      Fichier_web.xlsx: "{{ outputs.download_web.uri }}"
+    outputFiles:
+      - 'bottleneck.db'
+    script: |
+      from kestra import Kestra
+      from function_creation_tables import creation_table
+
+      database = 'bottleneck'
+      fichiers = ['Fichier_erp.xlsx', 'Fichier_liaison.xlsx', 'Fichier_web.xlsx']
+
+      tables_export = creation_table(fichiers,database)
+
+      # On expose la valeur en tant qu'output Kestra
+      Kestra.outputs({"tables_creees": tables_export})
+  - id: cleaning_loop
+    type: io.kestra.plugin.core.flow.LoopUntil
+    condition: "{{ outputs.test_cleaning_tables.vars.test_ok }}"
+    checkFrequency:
+      maxIterations: 10
+    tasks:     
+    - id: cleaning_tables
+      type: io.kestra.plugin.scripts.python.Script
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        functions_cleaning_tables.py: "{{read('functions_cleaning_tables.py')}}"
+        bottleneck.db: "{{ outputs.creation_tables_duckdb.outputFiles['bottleneck.db']}}"     
+      outputFiles:
+        - 'bottleneck.db'
+      script: |
+        from functions_cleaning_tables import delete_columns_null, delete_null_row, dedoublement, convert_format
+        from kestra import Kestra
+        
+        tables_export = {{ outputs.creation_tables_duckdb.vars.tables_creees }}
+        database = 'bottleneck'
+
+        _,tables_clean1 = delete_columns_null(tables_export,database)
+        tables_clean2 = delete_null_row(tables_export,tables_clean1, database)
+        tables_clean3 = dedoublement(tables_export,tables_clean2, database)
+        tables_clean4 = convert_format(tables_export,tables_clean3, database)
+
+        Kestra.outputs({"tables_nettoyees": tables_clean4})
+
+    - id: test_cleaning_tables
+      type: io.kestra.plugin.scripts.python.Commands
+      containerImage: kestra-custom-image:latest
+      allowFailure: true
+      inputFiles:
+        test_cleaning.py: "{{read('test_cleaning.py')}}"
+        conftest.py: "{{ read('conftest.py') }}"
+        bottleneck.db: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db']}}"
+      commands:
+        - pytest
+        
+    - id: verification_if_ko
+      type: io.kestra.plugin.core.flow.If
+      condition: "{{ outputs.test_cleaning_tables.vars.test_ok == false }}"
+      then:
+        - id: verification
+          type: io.kestra.plugin.core.flow.Pause
+
+  - id: cleaning_special_loop
+    type: io.kestra.plugin.core.flow.LoopUntil
+    condition: "{{ outputs.test_cleaning_tables_specific.vars.test_ok }}"
+    checkFrequency:
+      maxIterations: 10
+    tasks:
+    - id: cleaning_tables_special
+      type: io.kestra.plugin.scripts.python.Script
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        functions_specific_cleaning_tables.py: "{{read('functions_specific_cleaning_tables.py')}}"        
+        bottleneck.db: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db']}}"     
+      outputFiles:
+        - 'bottleneck.db'
+      script: |
+        from functions_specific_cleaning_tables import delete_negative_price, suppression_lignes
+        from kestra import Kestra
+
+        tables_export = {{ outputs.creation_tables_duckdb.vars.tables_creees }}
+        tables_clean = {{ outputs.cleaning_tables.vars.tables_nettoyees }}
+        database = 'bottleneck'
+
+        tables_clean1,tables_negative_prices = delete_negative_price(tables_export, tables_clean,database)
+        
+        # Suppression lignes avec bon-cadeau, concerne la table web_export_data_clean  
+      
+        tables_clean2 = suppression_lignes(tables_clean1, database, column='sku', valeur='bon-cadeau-25-euros')
+
+        # Suppression lignes attachment images, concerne la table web_export_data_clean
+        tables_clean3 = suppression_lignes(tables_clean2,database,column='post_type',valeur='attachment')
+
+        # Suppression lignes avec sku null, concerne la table web_export_data_clean
+        tables_clean4 = suppression_lignes(tables_clean3,database,column='sku',valeur=None)
+
+        Kestra.outputs({"tables_nettoyees": tables_clean4, "tables_prix_negatifs":tables_negative_prices})
+
+    - id: test_cleaning_tables_specific
+      type: io.kestra.plugin.scripts.python.Commands
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        test_cleaning_specific.py: "{{read('test_cleaning_specific.py')}}"
+        conftest.py: "{{ read('conftest.py') }}"
+        bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
+      commands:
+        - pytest
+
+    - id: verification_if_ko_2
+      type: io.kestra.plugin.core.flow.If
+      condition: "{{ outputs.test_cleaning_tables_specific.vars.test_ok == false }}"
+      then:
+        - id: verification_2
+          type: io.kestra.plugin.core.flow.Pause
+
+  - id: fusion_loop
+    type: io.kestra.plugin.core.flow.LoopUntil
+    condition: "{{ outputs.test_fusion_erp_web.vars.test_ok }}"
+    checkFrequency:
+      maxIterations: 10
+    tasks:
+    - id: fusion_erp_web_tables
+      type: io.kestra.plugin.scripts.python.Script
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        fusion_tables_liaison.py: "{{read('fusion_tables_liaison.py')}}"
+        bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
+      outputFiles:
+        - 'bottleneck.db'
+      script: |
+        from fusion_tables_liaison import join_tables_with_liaison
+        from kestra import Kestra
+        database = 'bottleneck'
+        table_fusion = join_tables_with_liaison('web_export_data_clean','sku',
+                                                'erp_export_data_clean', 'product_id',
+                                                'liaison_export_data_clean', 'id_web','product_id',
+                                                database, 'web_erp_joined')
+        
+        Kestra.outputs({"table fusionnée": table_fusion})
+
+    - id: test_fusion_erp_web
+      type: io.kestra.plugin.scripts.python.Commands
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        test_fusion_erp_web.py: "{{read('test_fusion_erp_web.py')}}"
+        conftest.py: "{{ read('conftest.py') }}"
+        bottleneck.db: "{{ outputs.fusion_erp_web_tables.outputFiles['bottleneck.db']}}"
+      commands:
+        - pytest
+        
+    - id: verification_if_ko_3
+      type: io.kestra.plugin.core.flow.If
+      condition: "{{ outputs.test_fusion_erp_web.vars.test_ok == false }}"
+      then:
+        - id: verification_3
+          type: io.kestra.plugin.core.flow.Pause
+
+  - id: calcul_CA_loop
+    type: io.kestra.plugin.core.flow.LoopUntil
+    condition: "{{ outputs.test_ca.vars.test_ok }}"
+    checkFrequency:
+      maxIterations: 10
+    tasks:
+    - id: calcul_CA
+      type: io.kestra.plugin.scripts.python.Script
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        bottleneck.db: "{{ outputs.fusion_erp_web_tables.outputFiles['bottleneck.db']}}"
+      outputFiles:
+        - 'bottleneck.db'
+      script: |
+        import duckdb
+
+        conn=duckdb.connect()
+        conn.sql("ATTACH IF NOT EXISTS 'bottleneck.db';")
+        
+        #Chiffre d'affaire par produit
+        conn.sql("""
+        CREATE OR REPLACE TABLE bottleneck.revenus_web AS
+        SELECT 
+            product_id,
+            price,
+            total_sales,
+            price*total_sales AS CA_product
+        FROM bottleneck.web_erp_joined;
+        """
+        )
+        print(conn.sql("FROM bottleneck.revenus_web LIMIT 5;"))
+
+        #Chiffre d'affaire global
+        print(conn.sql("SELECT SUM(price*total_sales) AS CA_global FROM bottleneck.revenus_web;"))
+
+        conn.close()
+
+    - id: test_ca
+      type: io.kestra.plugin.scripts.python.Commands
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        test_ca.py: "{{read('test_ca.py')}}"
+        conftest.py: "{{ read('conftest.py') }}"
+        bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
+      commands:
+        - pytest
+    - id: verification_if_ko_4
+      type: io.kestra.plugin.core.flow.If
+      condition: "{{ outputs.test_ca.vars.test_ok == false }}"
+      then:
+        - id: verification_4
+          type: io.kestra.plugin.core.flow.Pause
+
+  - id: generate_excel
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+    url: "jdbc:duckdb:"        
+    databaseUri: "{{ outputs.calcul_CA.outputFiles['bottleneck.db'] }}"
+    outputFiles:
+      - ca_products
+    fetchType: STORE
+    sql: |-
+      ATTACH 'bottleneck.db';
+      INSTALL excel;
+      LOAD excel;
+      COPY (
+        SELECT *
+        FROM 'revenus_web'
+      )
+      TO '{{ outputFiles.ca_products }}'
+      WITH (
+          FORMAT xlsx,
+          HEADER true,
+          SHEET 'CA_products'
+      );
+
+  - id: z_score_loop
+    type: io.kestra.plugin.core.flow.LoopUntil
+    condition: "{{ outputs.test_z_score.vars.test_ok }}"
+    checkFrequency:
+      maxIterations: 10
+    tasks:  
+    - id: z_score_calculation
+      type: io.kestra.plugin.scripts.python.Script
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
+        script_z_score.py: "{{ read('script_z_score.py') }}"
+      outputFiles:
+        - 'bottleneck.db'
+      script: |
+        import duckdb
+        from kestra import Kestra
+        from script_z_score import z_score
+
+        database = 'bottleneck'
+
+        table_z = z_score('web_erp_joined', database, 'price', 'premium')
+
+        Kestra.outputs({"table z-score": table_z})
+    
+    - id: test_z_score
+      type: io.kestra.plugin.scripts.python.Commands
+      containerImage: kestra-custom-image:latest
+      inputFiles:
+        test_z_score.py: "{{read('test_z_score.py')}}"
+        conftest.py: "{{ read('conftest.py') }}"
+        bottleneck.db: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db']}}"
+      commands:
+        - pytest
+    - id: verification_if_ko_5
+      type: io.kestra.plugin.core.flow.If
+      condition: "{{ outputs.test_z_score.vars.test_ok == false }}"
+      then:
+        - id: verification_5
+          type: io.kestra.plugin.core.flow.Pause
+  
+  - id: export_vins_parallel
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+      - id: vins_premium
+        type: io.kestra.plugin.jdbc.duckdb.Queries
+        url: "jdbc:duckdb:"
+        databaseUri: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db'] }}"
+        outputFiles:
+          - vins_premium.csv
+        fetchType: STORE
+        sql: |-
+          ATTACH 'bottleneck.db' (READ ONLY);
+
+          COPY (
+          SELECT * 
+          FROM 'web_erp_joined_z'
+          WHERE premium = 1
+          )
+          TO '{{ outputFiles['vins_premium.csv'] }}' (HEADER, DELIMITER ',');
+
+      - id: vins_ordinaires
+        type: io.kestra.plugin.jdbc.duckdb.Queries
+        url: "jdbc:duckdb:"
+        databaseUri: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db'] }}"
+        outputFiles:
+          - vins_ordinaires.csv
+        fetchType: STORE
+        sql: |-
+          ATTACH 'bottleneck.db' (READ ONLY);
+
+          COPY (
+          SELECT * 
+          FROM 'web_erp_joined_z' 
+          WHERE premium = 0
+          )
+          TO '{{ outputFiles['vins_ordinaires.csv'] }}' (HEADER, DELIMITER ',');
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
