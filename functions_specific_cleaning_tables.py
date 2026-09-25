@@ -31,7 +31,7 @@ def delete_negative_price(tables,tables_clean, database):
 
 
 # Suppression de lignes spécifiques
-def suppression_lignes(tables_clean,database='bottleneck', column='sku',valeur='bon-cadeau-25-euros'):
+def suppression_lignes(tables_clean,database, column,valeur):
     conn = duckdb.connect()
     conn.sql(f"ATTACH IF NOT EXISTS '{database}.db';")
     for table in tables_clean:
@@ -40,10 +40,17 @@ def suppression_lignes(tables_clean,database='bottleneck', column='sku',valeur='
         if column in describe_columns:
             print("nombre de lignes avant suppression: \n" )
             print(conn.sql(f"SELECT COUNT(*) FROM {database}.{table};"))
-            conn.sql(f"""
-                DELETE FROM {database}.{table}
-                WHERE {column} = {valeur};
-                """)
+            if valeur is not None:
+                conn.sql(f"""
+                    DELETE FROM {database}.{table}
+                    WHERE {column} = '{valeur}';
+                    """)
+            else:
+                conn.sql(f"""
+                    DELETE FROM {database}.{table}
+                    WHERE {column} IS NULL;
+                    """)
+
             print("nombre de lignes après suppression:\n" )
             print(conn.sql(f"SELECT COUNT(*) FROM {database}.{table};"))
         else:

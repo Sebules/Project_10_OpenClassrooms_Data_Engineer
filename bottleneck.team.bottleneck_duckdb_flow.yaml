@@ -123,7 +123,10 @@ tasks:
       # Suppression lignes attachment images, concerne la table web_export_data_clean
       tables_clean3 = suppression_lignes(tables_clean2,database,column='post_type',valeur='attachment')
 
-      Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
+      # Suppression lignes avec sku null, concerne la table web_export_data_clean
+      tables_clean4 = suppression_lignes(tables_clean3,database,column='sku',valeur=None)
+
+      Kestra.outputs({"tables_nettoyees": tables_clean4, "tables_prix_negatifs":tables_negative_prices})
 
   - id: verif_tables_clean_specific
     type: io.kestra.plugin.jdbc.duckdb.Queries
