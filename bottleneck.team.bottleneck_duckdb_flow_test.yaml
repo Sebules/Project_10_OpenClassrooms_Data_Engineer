@@ -1,6 +1,12 @@
 id: bottleneck_duckdb_flow_test
 namespace: bottleneck.team
 
+# Mise en place d'une exécution de l’ensemble du workflow tous les 15 du mois à 9h
+triggers:
+  - id: schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 15 * *"
+
 tasks:
   - id: download_erp
     type: io.kestra.plugin.core.http.Download
@@ -106,17 +112,13 @@ tasks:
 
         tables_clean1,tables_negative_prices = delete_negative_price(tables_export, tables_clean,database)
         
-        # Suppression lignes avec bon-cadeau, concerne la table web_export_data_clean  
-      
-        tables_clean2 = suppression_lignes(tables_clean1, database, column='sku', valeur='bon-cadeau-25-euros')
-
         # Suppression lignes attachment images, concerne la table web_export_data_clean
-        tables_clean3 = suppression_lignes(tables_clean2,database,column='post_type',valeur='attachment')
+        tables_clean2 = suppression_lignes(tables_clean1,database,column='post_type',valeur='attachment')
 
         # Suppression lignes avec sku null, concerne la table web_export_data_clean
-        tables_clean4 = suppression_lignes(tables_clean3,database,column='sku',valeur=None)
+        tables_clean3 = suppression_lignes(tables_clean2,database,column='sku',valeur=None)
 
-        Kestra.outputs({"tables_nettoyees": tables_clean4, "tables_prix_negatifs":tables_negative_prices})
+        Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
 
     - id: test_cleaning_tables_specific
       type: io.kestra.plugin.scripts.python.Commands
@@ -251,6 +253,38 @@ tasks:
           HEADER true,
           SHEET 'CA_products'
       );
+  - id: generate_excel_2
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: kestra-custom-image:latest
+    beforeCommands:
+      - pip install --no-cache-dir openpyxl
+    inputFiles:
+      bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
+    outputFiles:
+      - ca_products_global
+    script: |
+      import duckdb
+      import pandas as pd
+      
+      conn = duckdb.connect()
+      conn.sql("ATTACH 'bottleneck.db';")
+      # Récupérer chaque résultat sous forme de DataFrame
+      df_products = conn.sql("""
+          SELECT *
+          FROM bottleneck.revenus_web
+      """).df()
+
+      df_global = conn.sql("""
+          SELECT SUM(price * total_sales) AS CA_global
+          FROM bottleneck.revenus_web
+      """).df()
+
+      # Écrire les deux feuilles dans le même fichier
+      with pd.ExcelWriter('{{ outputFiles.ca_products_global }}', engine='openpyxl') as writer:
+          df_products.to_excel(writer, sheet_name='CA_products', index=False)
+          df_global.to_excel(writer, sheet_name='CA_global', index=False)
+      
+      conn.close()
 
   - id: z_score_loop
     type: io.kestra.plugin.core.flow.LoopUntil
@@ -304,7 +338,7 @@ tasks:
           - vins_premium.csv
         fetchType: STORE
         sql: |-
-          ATTACH 'bottleneck.db' (READ ONLY);
+          ATTACH 'bottleneck.db' (READ_ONLY);
 
           COPY (
           SELECT * 
@@ -321,7 +355,7 @@ tasks:
           - vins_ordinaires.csv
         fetchType: STORE
         sql: |-
-          ATTACH 'bottleneck.db' (READ ONLY);
+          ATTACH 'bottleneck.db' (READ_ONLY);
 
           COPY (
           SELECT * 
@@ -329,11 +363,6 @@ tasks:
           WHERE premium = 0
           )
           TO '{{ outputFiles['vins_ordinaires.csv'] }}' (HEADER, DELIMITER ',');
-
-
-
-
-
 
 
 

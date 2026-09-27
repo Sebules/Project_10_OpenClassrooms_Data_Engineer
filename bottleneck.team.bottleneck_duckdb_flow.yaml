@@ -1,6 +1,13 @@
 id: bottleneck_duckdb_flow
 namespace: bottleneck.team
 
+# Mise en place d'une exécution de l’ensemble du workflow tous les 15 du mois à 9h
+triggers:
+  - id: schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 15 * *"
+
+
 tasks:
   - id: download_erp
     type: io.kestra.plugin.core.http.Download
@@ -16,10 +23,7 @@ tasks:
 
   - id: creation_tables_duckdb
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb kestra
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles: 
       function_creation_tables.py: "{{ read('function_creation_tables.py') }}"
       Fichier_erp.xlsx: "{{ outputs.download_erp.uri }}"
@@ -52,10 +56,7 @@ tasks:
   
   - id: cleaning_tables
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb kestra
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles:
       functions_cleaning_tables.py: "{{read('functions_cleaning_tables.py')}}"
       bottleneck.db: "{{ outputs.creation_tables_duckdb.outputFiles['bottleneck.db']}}"     
@@ -97,10 +98,7 @@ tasks:
 
   - id: cleaning_tables_special
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb kestra
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles:
       functions_specific_cleaning_tables.py: "{{read('functions_specific_cleaning_tables.py')}}"
       bottleneck.db: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db']}}"     
@@ -116,17 +114,13 @@ tasks:
 
       tables_clean1,tables_negative_prices = delete_negative_price(tables_export, tables_clean,database)
       
-      # Suppression lignes avec bon-cadeau, concerne la table web_export_data_clean  
-    
-      tables_clean2 = suppression_lignes(tables_clean1, database, column='sku', valeur='bon-cadeau-25-euros')
-
       # Suppression lignes attachment images, concerne la table web_export_data_clean
-      tables_clean3 = suppression_lignes(tables_clean2,database,column='post_type',valeur='attachment')
+      tables_clean2 = suppression_lignes(tables_clean1,database,column='post_type',valeur='attachment')
 
       # Suppression lignes avec sku null, concerne la table web_export_data_clean
-      tables_clean4 = suppression_lignes(tables_clean3,database,column='sku',valeur=None)
+      tables_clean3 = suppression_lignes(tables_clean2,database,column='sku',valeur=None)
 
-      Kestra.outputs({"tables_nettoyees": tables_clean4, "tables_prix_negatifs":tables_negative_prices})
+      Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
 
   - id: verif_tables_clean_specific
     type: io.kestra.plugin.jdbc.duckdb.Queries
@@ -142,10 +136,7 @@ tasks:
 
   - id: fusion_erp_web_tables
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb kestra
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles:
      fusion_tables_liaison.py: "{{read('fusion_tables_liaison.py')}}"
      bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
@@ -178,10 +169,7 @@ tasks:
 
   - id: calcul_CA
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles:
      bottleneck.db: "{{ outputs.fusion_erp_web_tables.outputFiles['bottleneck.db']}}"
     outputFiles:
@@ -230,12 +218,43 @@ tasks:
           HEADER true,
           SHEET 'CA_products'
       );
+      
+  - id: generate_excel_2
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: kestra-custom-image:latest
+    beforeCommands:
+      - pip install --no-cache-dir openpyxl
+    inputFiles:
+      bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
+    outputFiles:
+      - ca_products_global
+    script: |
+      import duckdb
+      import pandas as pd
+      
+      conn = duckdb.connect()
+      conn.sql("ATTACH 'bottleneck.db';")
+      # Récupérer chaque résultat sous forme de DataFrame
+      df_products = conn.sql("""
+          SELECT *
+          FROM bottleneck.revenus_web
+      """).df()
+
+      df_global = conn.sql("""
+          SELECT SUM(price * total_sales) AS CA_global
+          FROM bottleneck.revenus_web
+      """).df()
+
+      # Écrire les deux feuilles dans le même fichier
+      with pd.ExcelWriter('{{ outputFiles.ca_products_global }}', engine='openpyxl') as writer:
+          df_products.to_excel(writer, sheet_name='CA_products', index=False)
+          df_global.to_excel(writer, sheet_name='CA_global', index=False)
+      
+      conn.close()
+
   - id: z_score_calculation
     type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.13-slim
-    beforeCommands:
-      - pip install --no-cache-dir duckdb kestra pandas
-    dependencyCacheEnabled: true
+    containerImage: kestra-custom-image:latest
     inputFiles:
      bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
      script_z_score.py: "{{ read('script_z_score.py') }}"
@@ -295,11 +314,6 @@ tasks:
       WHERE premium = 0
       )
       TO '{{ outputFiles['vins_ordinaires.csv'] }}' (HEADER, DELIMITER ',');
-
-
-
-
-
 
 
 
