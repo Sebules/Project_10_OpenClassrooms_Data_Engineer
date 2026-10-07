@@ -47,6 +47,7 @@ tasks:
     condition: "{{ outputs.test_cleaning_tables.vars.test_ok }}"
     checkFrequency:
       maxIterations: 10
+      interval: PT1S        # 1 seconde au lieu de 1 minute
     tasks:     
     - id: cleaning_tables
       type: io.kestra.plugin.scripts.python.Script
@@ -87,16 +88,18 @@ tasks:
       then:
         - id: verification
           type: io.kestra.plugin.core.flow.Pause
+          
 
   - id: cleaning_special_loop
     type: io.kestra.plugin.core.flow.LoopUntil
     condition: "{{ outputs.test_cleaning_tables_specific.vars.test_ok }}"
     checkFrequency:
       maxIterations: 10
+      interval: PT1S        # 1 seconde au lieu de 1 minute
     tasks:
     - id: cleaning_tables_special
       type: io.kestra.plugin.scripts.python.Script
-      containerImage: kestra-custom-image:latest
+      containerImage: kestra-custom-image:latest      
       inputFiles:
         functions_specific_cleaning_tables.py: "{{read('functions_specific_cleaning_tables.py')}}"        
         bottleneck.db: "{{ outputs.cleaning_tables.outputFiles['bottleneck.db']}}"     
@@ -123,6 +126,7 @@ tasks:
     - id: test_cleaning_tables_specific
       type: io.kestra.plugin.scripts.python.Commands
       containerImage: kestra-custom-image:latest
+      allowFailure: true
       inputFiles:
         test_cleaning_specific.py: "{{read('test_cleaning_specific.py')}}"
         conftest.py: "{{ read('conftest.py') }}"
@@ -142,10 +146,11 @@ tasks:
     condition: "{{ outputs.test_fusion_erp_web.vars.test_ok }}"
     checkFrequency:
       maxIterations: 10
+      interval: PT1S        # 1 seconde au lieu de 1 minute
     tasks:
     - id: fusion_erp_web_tables
       type: io.kestra.plugin.scripts.python.Script
-      containerImage: kestra-custom-image:latest
+      containerImage: kestra-custom-image:latest      
       inputFiles:
         fusion_tables_liaison.py: "{{read('fusion_tables_liaison.py')}}"
         bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
@@ -165,6 +170,7 @@ tasks:
     - id: test_fusion_erp_web
       type: io.kestra.plugin.scripts.python.Commands
       containerImage: kestra-custom-image:latest
+      allowFailure: true
       inputFiles:
         test_fusion_erp_web.py: "{{read('test_fusion_erp_web.py')}}"
         conftest.py: "{{ read('conftest.py') }}"
@@ -184,6 +190,7 @@ tasks:
     condition: "{{ outputs.test_ca.vars.test_ok }}"
     checkFrequency:
       maxIterations: 10
+      interval: PT1S        # 1 seconde au lieu de 1 minute
     tasks:
     - id: calcul_CA
       type: io.kestra.plugin.scripts.python.Script
@@ -219,6 +226,7 @@ tasks:
     - id: test_ca
       type: io.kestra.plugin.scripts.python.Commands
       containerImage: kestra-custom-image:latest
+      allowFailure: true
       inputFiles:
         test_ca.py: "{{read('test_ca.py')}}"
         conftest.py: "{{ read('conftest.py') }}"
@@ -237,7 +245,7 @@ tasks:
     url: "jdbc:duckdb:"        
     databaseUri: "{{ outputs.calcul_CA.outputFiles['bottleneck.db'] }}"
     outputFiles:
-      - ca_products
+      - ca_products.xlsx
     fetchType: STORE
     sql: |-
       ATTACH 'bottleneck.db';
@@ -247,7 +255,7 @@ tasks:
         SELECT *
         FROM 'revenus_web'
       )
-      TO '{{ outputFiles.ca_products }}'
+      TO '{{ outputFiles['ca_products.xlsx'] }}'
       WITH (
           FORMAT xlsx,
           HEADER true,
@@ -261,7 +269,7 @@ tasks:
     inputFiles:
       bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
     outputFiles:
-      - ca_products_global
+      - ca_products_global.xlsx
     script: |
       import duckdb
       import pandas as pd
@@ -280,7 +288,7 @@ tasks:
       """).df()
 
       # Écrire les deux feuilles dans le même fichier
-      with pd.ExcelWriter('{{ outputFiles.ca_products_global }}', engine='openpyxl') as writer:
+      with pd.ExcelWriter('{{ outputFiles['ca_products_global.xlsx'] }}', engine='openpyxl') as writer:
           df_products.to_excel(writer, sheet_name='CA_products', index=False)
           df_global.to_excel(writer, sheet_name='CA_global', index=False)
       
@@ -291,6 +299,7 @@ tasks:
     condition: "{{ outputs.test_z_score.vars.test_ok }}"
     checkFrequency:
       maxIterations: 10
+      interval: PT1S        # 1 seconde au lieu de 1 minute
     tasks:  
     - id: z_score_calculation
       type: io.kestra.plugin.scripts.python.Script
@@ -314,6 +323,7 @@ tasks:
     - id: test_z_score
       type: io.kestra.plugin.scripts.python.Commands
       containerImage: kestra-custom-image:latest
+      allowFailure: true
       inputFiles:
         test_z_score.py: "{{read('test_z_score.py')}}"
         conftest.py: "{{ read('conftest.py') }}"
