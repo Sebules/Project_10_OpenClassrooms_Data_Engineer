@@ -56,7 +56,7 @@ flowchart TD;
   D["Calcul du z-score sur le prix des vins"]
   E["Extraction rapport en Excel"]
   s1@{shape: doc, label: "Extrait CA par produit et total<br/>(fichier Excel)"}
-  T4["Test de cohérence:<br/>prix vs seuil vin premium/vin ordinaire"]
+  T4["Test de cohérence:<br/>z-score vs catégorie vin premium/vin ordinaire"]
   c4{"Test OK?"}
   V4["Vérifier les prix incohérents"]
   F["Séparation des données vins premium/ordinaires"]
@@ -191,7 +191,13 @@ Lancer les tests avec :
 ```bash
 pytest
 ```
+### Visualisation dans PowerBI
 
+**Tables chargées**<br>
+![Tables_PowerBI.png](Tables_PowerBI.png)
+
+**Dashboard** <br>
+![Dashboard_PowerBI.png](Dashboard_PowerBI.png)
 ---
 
 ## 🇬🇧 English
@@ -226,36 +232,36 @@ The full pipeline architecture (import → cleaning → tests → join → reven
 
 flowchart TD;
   DT[("Database")]
-  e1["Import des données<br/>- erp.xlsx<br/>- liaison.xlsx<br/>- web.xlsx"]
-  d1@{ shape: lean-r, label: "Données exportées" }
-  A["Nettoyage:<br/>- suppression doublons<br/>- colonnes vides<br/>- lignes vides<br/>- formatage (date, texte, entiers...)"]
-  d2@{ shape: lean-r, label: "Données nettoyées" }
-  T1["Tests:<br/>- format de données,<br/>- unicité,<br/>- colonnes ou lignes vides"]
+  e1["Data import<br/>- erp.xlsx<br/>- liaison.xlsx<br/>- web.xlsx"]
+  d1@{ shape: lean-r, label: "Exported data" }
+  A["Cleaning:<br/>- remove duplicates<br/>- empty columns<br/>- empty rows<br/>- formatting (date, text, integers...)"]
+  d2@{ shape: lean-r, label: "Cleaned data" }
+  T1["Tests:<br/>- data format,<br/>- uniqueness,<br/>- empty columns or rows"]
   c1{"Tests OK?"}
-  V1["Vérifier les données"]
-  B["Jointure:<br/>Jonction des tables erp et web<br/>via la table liaison"]
-  d3@{ shape: lean-r, label: "Table Fusion" }
-  T2["Tests:<br/>comparaison du nombre de lignes avant et après jonction"]
+  V1["Check the data"]
+  B["Join:<br/>Merge the erp and web tables<br/>via the liaison table"]
+  d3@{ shape: lean-r, label: "Merged table" }
+  T2["Tests:<br/>compare row count before and after join"]
   c2{"Tests OK?"}
-  V2["Vérifier les données"]
-  C["Calcul du chiffre d'affaires (CA):<br/>- par vin,<br/>- total"]
-  T3["Test de cohérence du CA:<br/>sommes des CA par vin vs CA total"]
-  c3{"CA cohérent?"}
-  V3["Vérifier les données"]
-  D["Calcul du z-score sur le prix des vins"]
-  E["Extraction rapport en Excel"]
-  s1@{shape: doc, label: "Extrait CA par produit et total<br/>(fichier Excel)"}
-  T4["Test de cohérence:<br/>prix vs seuil vin premium/vin ordinaire"]
+  V2["Check the data"]
+  C["Revenue calculation:<br/>- per wine,<br/>- total"]
+  T3["Revenue consistency test:<br/>sum of revenue per wine vs total revenue"]
+  c3{"Revenue consistent?"}
+  V3["Check the data"]
+  D["Z-score calculation on wine prices"]
+  E["Export report to Excel"]
+  s1@{shape: doc, label: "Revenue extract by product and total<br/>(Excel file)"}
+  T4["Consistency test:<br/>z-score vs premium wine / ordinary wine category"]
   c4{"Test OK?"}
-  V4["Vérifier les prix incohérents"]
-  F["Séparation des données vins premium/ordinaires"]
-  G-1["Extraction des données"]
-  G-2["Extraction des données"]
-  d4@{ shape: lean-r, label: "données vins premium" }
-  d5@{ shape: lean-r, label: "données vins secondaires" }
-  s2@{shape: doc, label: "Extrait vins premium<br/>(fichier CSV)"}
-  s3@{shape: doc, label: "Extrait vins secondaires<br/>(fichier CSV)"}
-  fin@{shape: terminal, label: "fin"}
+  V4["Check inconsistent prices"]
+  F["Split premium / ordinary wine data"]
+  G-1["Data extraction"]
+  G-2["Data extraction"]
+  d4@{ shape: lean-r, label: "Premium wine data" }
+  d5@{ shape: lean-r, label: "Secondary wine data" }
+  s2@{shape: doc, label: "Premium wine extract<br/>(CSV file)"}
+  s3@{shape: doc, label: "Secondary wine extract<br/>(CSV file)"}
+  fin@{shape: terminal, label: "end"}
 
   DT-->e1;
   e1-->d1;
@@ -263,26 +269,26 @@ flowchart TD;
   A-->d2;
   d2-->T1;
   T1-->c1;
-  c1-->|"non"|V1;
-  c1-->|"oui"| B;  
+  c1-->|"no"|V1;
+  c1-->|"yes"| B;  
   V1-->A;  
   B-->d3;
   d3-->T2;
   T2-->c2;
-  c2-->|"non"| V2;
-  c2-->|"oui"| C;
+  c2-->|"no"| V2;
+  c2-->|"yes"| C;
   V2-->B;
   C-->T3;
   T3-->c3;
-  c3-->|"non"| V3;
-  c3-->|"oui"| D;
-  c3--"oui"--> E;
+  c3-->|"no"| V3;
+  c3-->|"yes"| D;
+  c3--"yes"--> E;
   V3-->C;
   E-->s1;
   D-->T4;
   T4-->c4;
-  c4-->|"non"| V4;
-  c4-->|"oui"| F;
+  c4-->|"no"| V4;
+  c4-->|"yes"| F;
   V4-->D;
   F-->d4;
   F-->d5;
@@ -381,7 +387,13 @@ Run the tests with:
 ```bash
 pytest
 ```
+### Visualization in PowerBI
 
+**Imported Tables** <br>
+![Tables_PowerBI.png](Tables_PowerBI.png)
+
+**Dashboard** <br>
+![Dashboard_PowerBI.png](Dashboard_PowerBI.png)
 ---
 
 ## Structure du projet / Project structure
