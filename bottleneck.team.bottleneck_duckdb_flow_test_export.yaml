@@ -7,7 +7,9 @@ triggers:
     type: io.kestra.plugin.core.trigger.Schedule
     cron: "0 9 15 * *"
 
+# Définition des tâches du workflow
 tasks:
+# Téléchargement des fichiers sources
   - id: download_erp
     type: io.kestra.plugin.core.http.Download
     uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_erp.xlsx"
@@ -20,6 +22,7 @@ tasks:
     type: io.kestra.plugin.core.http.Download
     uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_web.xlsx"
 
+# Création des tables dans DuckDB à partir des fichiers sources
   - id: creation_tables_duckdb
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -42,16 +45,20 @@ tasks:
 
       # On expose la valeur en tant qu'output Kestra
       Kestra.outputs({"tables_creees": tables_export})
+
+# loop until pour la vérification de la création des tables dans DuckDB
   - id: cleaning_loop
-    type: io.kestra.plugin.core.flow.LoopUntil
+    type: io.kestra.plugin.core.flow.LoopUntil # LoopUntil est utilisé pour répéter les tâches jusqu'à ce qu'une condition soit remplie
     condition: "{{ outputs.test_cleaning_tables.vars.test_ok }}"
-    checkFrequency:
+    checkFrequency: # Fréquence de vérification
       maxIterations: 10
       interval: PT1S # 1 seconde au lieu de 1 minute
+
+# Nettoyage des tables dans DuckDB     
     tasks:
       - id: cleaning_tables
-        type: io.kestra.plugin.scripts.python.Script
-        containerImage: kestra-custom-image:latest
+        type: io.kestra.plugin.scripts.python.Script # Type de tâche pour exécuter un script Python
+        containerImage: kestra-custom-image:latest # Image Docker personnalisée contenant les dépendances nécessaires pour exécuter le script Python
         inputFiles:
           functions_cleaning_tables.py: "{{read('functions_cleaning_tables.py')}}"
           bottleneck.db: "{{ outputs.creation_tables_duckdb.outputFiles['bottleneck.db']}}"
@@ -71,10 +78,11 @@ tasks:
 
           Kestra.outputs({"tables_nettoyees": tables_clean4})
 
+# test de la vérification du nettoyage des tables dans DuckDB
       - id: test_cleaning_tables
         type: io.kestra.plugin.scripts.python.Commands
         containerImage: kestra-custom-image:latest
-        allowFailure: true
+        allowFailure: true # Permet de continuer l'exécution même si le test échoue
         inputFiles:
           test_cleaning.py: "{{read('test_cleaning.py')}}"
           conftest.py: "{{ read('conftest.py') }}"
@@ -82,13 +90,15 @@ tasks:
         commands:
           - pytest
 
+# verification si le test de nettoyage des tables échoue
       - id: verification_if_ko
         type: io.kestra.plugin.core.flow.If
         condition: "{{ outputs.test_cleaning_tables.vars.test_ok == false }}"
         then:
           - id: verification
-            type: io.kestra.plugin.core.flow.Pause
+            type: io.kestra.plugin.core.flow.Pause # Pause l'exécution du workflow si le test échoue, permettant une intervention manuelle pour corriger le problème avant de continuer.
 
+# Boucle de nettoyage spécial
   - id: cleaning_special_loop
     type: io.kestra.plugin.core.flow.LoopUntil
     condition: "{{ outputs.test_cleaning_tables_specific.vars.test_ok }}"
@@ -96,6 +106,7 @@ tasks:
       maxIterations: 10
       interval: PT1S # 1 seconde au lieu de 1 minute
     tasks:
+# Nettoyage spécifique des tables dans DuckDB
       - id: cleaning_tables_special
         type: io.kestra.plugin.scripts.python.Script
         containerImage: kestra-custom-image:latest
@@ -122,6 +133,7 @@ tasks:
 
           Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
 
+# Test de la vérification du nettoyage spécifique des tables dans DuckDB
       - id: test_cleaning_tables_specific
         type: io.kestra.plugin.scripts.python.Commands
         containerImage: kestra-custom-image:latest
@@ -132,7 +144,7 @@ tasks:
           bottleneck.db: "{{ outputs.cleaning_tables_special.outputFiles['bottleneck.db']}}"
         commands:
           - pytest
-
+# Verification si le test de nettoyage spécifique des tables échoue
       - id: verification_if_ko_2
         type: io.kestra.plugin.core.flow.If
         condition: "{{ outputs.test_cleaning_tables_specific.vars.test_ok == false }}"
@@ -140,6 +152,7 @@ tasks:
           - id: verification_2
             type: io.kestra.plugin.core.flow.Pause
 
+# Boucle de fusion des tables dans DuckDB
   - id: fusion_loop
     type: io.kestra.plugin.core.flow.LoopUntil
     condition: "{{ outputs.test_fusion_erp_web.vars.test_ok }}"
@@ -147,6 +160,7 @@ tasks:
       maxIterations: 10
       interval: PT1S # 1 seconde au lieu de 1 minute
     tasks:
+# Fusion des tables dans DuckDB    
       - id: fusion_erp_web_tables
         type: io.kestra.plugin.scripts.python.Script
         containerImage: kestra-custom-image:latest
@@ -166,6 +180,7 @@ tasks:
 
           Kestra.outputs({"table fusionnée": table_fusion})
 
+# Test de la vérification de la fusion des tables dans DuckDB
       - id: test_fusion_erp_web
         type: io.kestra.plugin.scripts.python.Commands
         containerImage: kestra-custom-image:latest
@@ -177,6 +192,7 @@ tasks:
         commands:
           - pytest
 
+# Verification si le test de fusion des tables échoue
       - id: verification_if_ko_3
         type: io.kestra.plugin.core.flow.If
         condition: "{{ outputs.test_fusion_erp_web.vars.test_ok == false }}"
@@ -184,6 +200,7 @@ tasks:
           - id: verification_3
             type: io.kestra.plugin.core.flow.Pause
 
+# Boucle de calcul du chiffre d'affaire par produit et global dans DuckDB
   - id: calcul_CA_loop
     type: io.kestra.plugin.core.flow.LoopUntil
     condition: "{{ outputs.test_ca.vars.test_ok }}"
@@ -191,6 +208,7 @@ tasks:
       maxIterations: 10
       interval: PT1S # 1 seconde au lieu de 1 minute
     tasks:
+# Calcul du chiffre d'affaire par produit et global dans DuckDB
       - id: calcul_CA
         type: io.kestra.plugin.scripts.python.Script
         containerImage: kestra-custom-image:latest
@@ -222,6 +240,7 @@ tasks:
 
           conn.close()
 
+# Test de la vérification du calcul du chiffre d'affaire par produit et global dans DuckDB
       - id: test_ca
         type: io.kestra.plugin.scripts.python.Commands
         containerImage: kestra-custom-image:latest
@@ -232,6 +251,7 @@ tasks:
           bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
         commands:
           - pytest
+# Verification si le test du calcul du chiffre d'affaire échoue
       - id: verification_if_ko_4
         type: io.kestra.plugin.core.flow.If
         condition: "{{ outputs.test_ca.vars.test_ok == false }}"
@@ -239,6 +259,7 @@ tasks:
           - id: verification_4
             type: io.kestra.plugin.core.flow.Pause
 
+# génération d'un fichier Excel avec le chiffre d'affaire par produit et global dans DuckDB
   - id: generate_excel
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"
@@ -260,6 +281,7 @@ tasks:
           HEADER true,
           SHEET 'CA_products'
       );
+# génération d'un fichier Excel avec le chiffre d'affaire par produit et global dans DuckDB en utilisant Pandas et Openpyxl
   - id: generate_excel_2
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -293,6 +315,7 @@ tasks:
 
       conn.close()
 
+# Boucle de calcul du z-score pour la colonne price dans DuckDB
   - id: z_score_loop
     type: io.kestra.plugin.core.flow.LoopUntil
     condition: "{{ outputs.test_z_score.vars.test_ok }}"
@@ -300,6 +323,7 @@ tasks:
       maxIterations: 10
       interval: PT1S # 1 seconde au lieu de 1 minute
     tasks:
+# Calcul du z-score pour la colonne price dans DuckDB
       - id: z_score_calculation
         type: io.kestra.plugin.scripts.python.Script
         containerImage: kestra-custom-image:latest
@@ -319,6 +343,7 @@ tasks:
 
           Kestra.outputs({"table z-score": table_z})
 
+# Test de la vérification du calcul du z-score pour la colonne price dans DuckDB
       - id: test_z_score
         type: io.kestra.plugin.scripts.python.Commands
         containerImage: kestra-custom-image:latest
@@ -329,6 +354,7 @@ tasks:
           bottleneck.db: "{{ outputs.z_score_calculation.outputFiles['bottleneck.db']}}"
         commands:
           - pytest
+# Verification si le test du calcul du z-score échoue
       - id: verification_if_ko_5
         type: io.kestra.plugin.core.flow.If
         condition: "{{ outputs.test_z_score.vars.test_ok == false }}"
@@ -336,8 +362,10 @@ tasks:
           - id: verification_5
             type: io.kestra.plugin.core.flow.Pause
 
+# Génération de fichiers CSV pour les vins premium et ordinaires dans DuckDB
   - id: export_vins_parallel
-    type: io.kestra.plugin.core.flow.Parallel
+    type: io.kestra.plugin.core.flow.Parallel 
+    # Parallel est utilisé pour exécuter plusieurs tâches en parallèle, ce qui peut améliorer les performances lorsque les tâches sont indépendantes les unes des autres.
     tasks:
       - id: vins_premium
         type: io.kestra.plugin.jdbc.duckdb.Queries
@@ -347,7 +375,7 @@ tasks:
           - vins_premium.csv
         fetchType: STORE
         sql: |-
-          ATTACH 'bottleneck.db' (READ_ONLY);
+          ATTACH 'bottleneck.db' (READ_ONLY); 
 
           COPY (
           SELECT * 

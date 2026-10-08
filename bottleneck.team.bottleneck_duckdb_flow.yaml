@@ -7,8 +7,9 @@ triggers:
     type: io.kestra.plugin.core.trigger.Schedule
     cron: "0 9 15 * *"
 
-
+# Définition des tâches du workflow
 tasks:
+# Téléchargement des fichiers sources
   - id: download_erp
     type: io.kestra.plugin.core.http.Download
     uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_erp.xlsx"
@@ -21,6 +22,7 @@ tasks:
     type: io.kestra.plugin.core.http.Download
     uri: "https://github.com/Sebules/Project_10_OpenClassrooms_Data_Engineer/raw/refs/heads/main/bottleneck/bottleneck/Fichier_web.xlsx"
 
+# Création des tables dans DuckDB à partir des fichiers sources
   - id: creation_tables_duckdb
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -42,7 +44,8 @@ tasks:
 
       # On expose la valeur en tant qu'output Kestra
       Kestra.outputs({"tables_creees": tables_export})
-      
+
+# Vérification de la création des tables dans DuckDB    
   - id: verif_table_creation
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
@@ -53,7 +56,8 @@ tasks:
       SELECT * FROM 'erp_export_data' LIMIT 5;
       SELECT * FROM 'web_export_data' LIMIT 5;
       SELECT * FROM 'liaison_export_data' LIMIT 5;
-  
+
+# Nettoyage des tables dans DuckDB  
   - id: cleaning_tables
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -76,6 +80,7 @@ tasks:
 
       Kestra.outputs({"tables_nettoyees": tables_clean4})
 
+# Vérification du nettoyage des tables dans DuckDB
   - id: verif_tables_clean
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
@@ -96,6 +101,7 @@ tasks:
       SUMMARIZE FROM 'web_export_data_clean';
       SUMMARIZE FROM 'liaison_export_data_clean';
 
+# Nettoyage spécifique des tables dans DuckDB
   - id: cleaning_tables_special
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -122,6 +128,7 @@ tasks:
 
       Kestra.outputs({"tables_nettoyees": tables_clean3, "tables_prix_negatifs":tables_negative_prices})
 
+# Vérification du nettoyage spécifique des tables dans DuckDB
   - id: verif_tables_clean_specific
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
@@ -134,6 +141,7 @@ tasks:
       SUMMARIZE FROM 'web_export_data_clean';
       SUMMARIZE FROM 'liaison_export_data_clean';
 
+# Fusion des tables dans DuckDB
   - id: fusion_erp_web_tables
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -153,6 +161,7 @@ tasks:
       
       Kestra.outputs({"table fusionnée": table_fusion})
 
+# Vérification de la fusion des tables dans DuckDB
   - id: verif_table_fusion
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
@@ -167,6 +176,7 @@ tasks:
       SELECT COUNT(*) FROM 'web_erp_joined';
       SELECT COUNT(*) FROM 'web_export_data_clean';
 
+# Calcul du chiffre d'affaire par produit et global dans DuckDB
   - id: calcul_CA
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -197,12 +207,14 @@ tasks:
       print(conn.sql("SELECT SUM(price*total_sales) AS CA_global FROM bottleneck.revenus_web;"))
 
       conn.close()
+
+# génération d'un fichier Excel avec le chiffre d'affaire par produit et global dans DuckDB
   - id: generate_excel
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
     databaseUri: "{{ outputs.calcul_CA.outputFiles['bottleneck.db'] }}"
     outputFiles:
-      - ca_products
+      - ca_products.xlsx
     fetchType: STORE
     sql: |-
       ATTACH 'bottleneck.db';
@@ -212,13 +224,13 @@ tasks:
         SELECT *
         FROM 'revenus_web'
       )
-      TO '{{ outputFiles.ca_products }}'
+      TO '{{ outputFiles['ca_products.xlsx'] }}'
       WITH (
           FORMAT xlsx,
           HEADER true,
           SHEET 'CA_products'
       );
-      
+# génération d'un fichier Excel avec le chiffre d'affaire par produit et global dans DuckDB en utilisant Pandas et Openpyxl      
   - id: generate_excel_2
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -227,7 +239,7 @@ tasks:
     inputFiles:
       bottleneck.db: "{{ outputs.calcul_CA.outputFiles['bottleneck.db']}}"
     outputFiles:
-      - ca_products_global
+      - ca_products_global.xlsx
     script: |
       import duckdb
       import pandas as pd
@@ -246,12 +258,13 @@ tasks:
       """).df()
 
       # Écrire les deux feuilles dans le même fichier
-      with pd.ExcelWriter('{{ outputFiles.ca_products_global }}', engine='openpyxl') as writer:
+      with pd.ExcelWriter('{{ outputFiles['ca_products_global.xlsx'] }}', engine='openpyxl') as writer:
           df_products.to_excel(writer, sheet_name='CA_products', index=False)
           df_global.to_excel(writer, sheet_name='CA_global', index=False)
       
       conn.close()
 
+# Calcul du z-score pour la colonne price dans DuckDB
   - id: z_score_calculation
     type: io.kestra.plugin.scripts.python.Script
     containerImage: kestra-custom-image:latest
@@ -270,7 +283,8 @@ tasks:
       table_z = z_score('web_erp_joined', database, 'price', 'premium')
 
       Kestra.outputs({"table z-score": table_z})
-  
+
+# Vérification du calcul du z-score pour la colonne price dans DuckDB  
   - id: verif_table_z
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"        
@@ -281,7 +295,7 @@ tasks:
    
       SELECT * FROM 'web_erp_joined_z' LIMIT 5;
   
-
+# Génération de fichiers CSV pour les vins premium et ordinaires dans DuckDB
   - id: vins_premium_ordinaires
     type: io.kestra.plugin.jdbc.duckdb.Queries
     url: "jdbc:duckdb:"
