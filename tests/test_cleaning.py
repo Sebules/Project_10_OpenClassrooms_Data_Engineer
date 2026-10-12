@@ -73,8 +73,11 @@ def test_dedoublement(conn):
         """).fetchone()[0]
 
         nb_rows_distinct = conn.sql(f"""
-        SELECT DISTINCT COUNT(*)
+        SELECT COUNT(*)
+        FROM (
+        SELECT DISTINCT *
         FROM {database}.{table}
+        )
         """).fetchone()[0]
 
         diff_rows = nb_rows -  nb_rows_distinct
