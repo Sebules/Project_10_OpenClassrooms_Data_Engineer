@@ -26,7 +26,7 @@ beautifulsoup4==4.15.0
     # via nbconvert
 bleach==6.4.0
     # via nbconvert
-certifi==2026.7.22
+certifi==2026.10.18
     # via
     #   httpcore
     #   httpx
@@ -174,7 +174,7 @@ mistune==3.3.4
     # via nbconvert
 nbclient==0.11.0
     # via nbconvert
-nbconvert==7.17.1
+nbconvert==7.17.2
     # via
     #   jupyter
     #   jupyter-server
